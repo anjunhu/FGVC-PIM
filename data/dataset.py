@@ -6,19 +6,25 @@ import torchvision.transforms as transforms
 from PIL import Image
 import copy
 import torch
+from torchvision.datasets import FGVCAircraft
 
 from .randaug import RandAugment
-
 
 def build_loader(args):
     train_set, train_loader = None, None
     if args.train_root is not None:
-        train_set = ImageDataset(istrain=True, root=args.train_root, data_size=args.data_size, return_index=True)
+        if 'aircraft' in args.train_root.lower():
+            train_set = AircraftWrapper(FGVCAircraft(root=args.train_root, split='train'), data_size=args.data_size, return_index=True) 
+        else:
+            train_set = ImageDataset(istrain=True, root=args.train_root, data_size=args.data_size, return_index=True)
         train_loader = torch.utils.data.DataLoader(train_set, num_workers=args.num_workers, shuffle=True, batch_size=args.batch_size)
 
     val_set, val_loader = None, None
     if args.val_root is not None:
-        val_set = ImageDataset(istrain=False, root=args.val_root, data_size=args.data_size, return_index=True)
+        if 'aircraft' in args.val_root.lower():
+            val_set = AircraftWrapper(FGVCAircraft(root=args.val_root, split='val'), data_size=args.data_size, return_index=True) 
+        else:
+            val_set = ImageDataset(istrain=False, root=args.val_root, data_size=args.data_size, return_index=True)
         val_loader = torch.utils.data.DataLoader(val_set, num_workers=1, shuffle=True, batch_size=args.batch_size)
 
     return train_loader, val_loader
@@ -28,6 +34,63 @@ def get_dataset(args):
         train_set = ImageDataset(istrain=True, root=args.train_root, data_size=args.data_size, return_index=True)
         return train_set
     return None
+
+
+class AircraftWrapper(torch.utils.data.Dataset):
+
+    def __init__(self, 
+                 ds,
+                 data_size: int,
+                 return_index: bool = False):
+        # notice that:
+        # sub_data_size mean sub-image's width and height.
+        """ basic information """
+        self.ds = ds
+        self.root = ds.root
+        self.data_size = data_size
+        self.return_index = return_index
+
+        """ declare data augmentation """
+        normalize = transforms.Normalize(
+                    mean=[0.485, 0.456, 0.406],
+                    std=[0.229, 0.224, 0.225]
+                )
+
+        # 448:600
+        # 384:510
+        # 768:
+        if ds._split == 'train':
+            # transforms.RandomApply([RandAugment(n=2, m=3, img_size=data_size)], p=0.1)
+            # RandAugment(n=2, m=3, img_size=sub_data_size)
+            ds.transform = transforms.Compose([
+                        transforms.Resize((510, 510), Image.BILINEAR),
+                        transforms.RandomCrop((data_size, data_size)),
+                        transforms.RandomHorizontalFlip(),
+                        transforms.RandomApply([transforms.GaussianBlur(kernel_size=(5, 5), sigma=(0.1, 5))], p=0.1),
+                        transforms.RandomAdjustSharpness(sharpness_factor=1.5, p=0.1),
+                        transforms.ToTensor(),
+                        normalize
+                ])
+        else:
+            ds.transform = transforms.Compose([
+                        transforms.Resize((510, 510), Image.BILINEAR),
+                        transforms.CenterCrop((data_size, data_size)),
+                        transforms.ToTensor(),
+                        normalize
+                ])
+
+    def __len__(self):
+        return len(self.ds)
+
+    def __getitem__(self, index):
+        img, label = self.ds.__getitem__(index)
+        if self.return_index:
+            # return index, img, sub_imgs, label, sub_boundarys
+            return index, img, label
+        
+        # return img, sub_imgs, label, sub_boundarys
+        return img, label
+
 
 
 class ImageDataset(torch.utils.data.Dataset):

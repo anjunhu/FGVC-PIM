@@ -26,8 +26,9 @@ def set_environment(args, tlogger):
     
     print("Setting Environment...")
 
-    args.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    
+    print('Visible CUDA devices: ', args.devices)
+    args.devices[0] = torch.device(f"cuda:{args.devices[0]}" if (torch.cuda.is_available() and -1 not in args.devices) else "cpu")
+
     ### = = = =  Dataset and Data Loader = = = =  
     tlogger.print("Building Dataloader....")
     
@@ -57,15 +58,17 @@ def set_environment(args, tlogger):
         num_selects = args.num_selects,
         use_combiner = args.use_combiner,
     ) # about return_nodes, we use our default setting
-    if args.pretrained is not None:
+    try:
         checkpoint = torch.load(args.pretrained, map_location=torch.device('cpu'))
         model.load_state_dict(checkpoint['model'])
         start_epoch = checkpoint['epoch']
-    else:
+    except Exception as e:
+        print(e)
         start_epoch = 0
 
-    # model = torch.nn.DataParallel(model, device_ids=None) # device_ids : None --> use all gpus.
-    model.to(args.device)
+    model.to(args.devices[0])
+    if len(args.devices) > 1 and torch.cuda.is_available():
+        model = torch.nn.DataParallel(model, device_ids=args.devices) # device_ids : None --> use all gpus.
     tlogger.print()
     
     """
@@ -75,7 +78,7 @@ def set_environment(args, tlogger):
     """
     
     if train_loader is None:
-        return train_loader, val_loader, model, None, None, None, None
+        return train_loader, val_loader, model, None, None, None, None, checkpoint['epoch']
     
     ### = = = =  Optimizer = = = =  
     tlogger.print("Building Optimizer....")
@@ -84,8 +87,11 @@ def set_environment(args, tlogger):
     elif args.optimizer == "AdamW":
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.max_lr)
 
-    if args.pretrained is not None:
+    try:
         optimizer.load_state_dict(checkpoint['optimizer'])
+    except Exception as e:
+        print(e)
+        start_epoch = 0
 
     tlogger.print()
 
@@ -116,7 +122,7 @@ def train(args, epoch, model, scaler, amp_context, optimizer, schedule, train_lo
         batch_size = labels.size(0)
 
         """ = = = = forward and calculate loss = = = = """
-        datas, labels = datas.to(args.device), labels.to(args.device)
+        datas, labels = datas.to(args.devices[0]), labels.to(args.devices[0])
 
         with amp_context():
             """
@@ -159,7 +165,7 @@ def train(args, epoch, model, scaler, amp_context, optimizer, schedule, train_lo
                         logit = outs[name].view(-1, args.num_classes).contiguous()
                         n_preds = nn.Tanh()(logit)
                         labels_0 = torch.zeros([batch_size * S, args.num_classes]) - 1
-                        labels_0 = labels_0.to(args.device)
+                        labels_0 = labels_0.to(args.devices[0])
                         loss_n = nn.MSELoss()(n_preds, labels_0)
                         loss += args.lambda_n * loss_n
                     else:
@@ -250,7 +256,7 @@ def main(args, tlogger):
             tlogger.print()
         else:
             from eval import eval_and_save
-            eval_and_save(args, model, val_loader)
+            eval_and_save(args, model, val_loader, tlogger)
             break
 
         eval_freq_schedule(args, epoch)

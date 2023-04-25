@@ -25,7 +25,10 @@ def get_args(with_deepspeed: bool=False):
     parser.add_argument("--exp_name", default="")
 
     parser.add_argument("--c", default="", type=str, help="config file path")
-    
+
+    # cuda devices
+    parser.add_argument('-d','--devices', nargs='+', type=int, help='visible cuda device ids', default=[-1], required=False)
+
     ### about dataset
     parser.add_argument("--train_root", default="", type=str) # "../NABirds/train/"
     parser.add_argument("--val_root", default="", type=str)

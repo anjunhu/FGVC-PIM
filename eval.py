@@ -36,7 +36,7 @@ def cal_train_metrics(args, msg: dict, outs: dict, labels: torch.Tensor, batch_s
             acc = round(acc * 100, 2)
             msg["train_acc/{}_acc".format(name)] = acc
             labels_0 = torch.zeros([B * S, args.num_classes]) - 1
-            labels_0 = labels_0.to(args.device)
+            labels_0 = labels_0.to(logit.device)
             loss = F.mse_loss(F.tanh(logit), labels_0)
             msg["train_loss/{}_loss".format(name)] = loss.item()
             total_loss += loss.item()
@@ -192,7 +192,7 @@ def evaluate(args, model, test_loader):
             
             score_names = []
             scores = []
-            datas = datas.to(args.device)
+            datas = datas.to(labels.device)
 
             outs = model(datas)
 
@@ -278,7 +278,7 @@ def evaluate_cm(args, model, test_loader):
 
             score_names = []
             scores = []
-            datas = datas.to(args.device)
+            datas = datas.to(labels.device)
             outs = model(datas)
 
             # if args.use_fpn and (0 < args.highest < 5):
